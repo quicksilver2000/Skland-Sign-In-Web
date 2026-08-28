@@ -7,7 +7,7 @@
 
 * Python 3.8 或更高版本
 * 或 Docker 环境
-> 如没有NAS或服务器环境，可以使用`GitHub Actions`签到，但海外网络存在触发森空岛风控的风险（目前未发现），另外使用 GitHub Actions 运行签到脚本存在违反 GitHub ToS 的风险，可能导致 GitHub 账号被封禁，请谨慎使用并自行承担后果。
+> 如没有NAS或服务器环境，可以使用`GitHub Actions`签到，但海外网络存在触发森空岛风控的风险（目前未发现），另外使用 GitHub Actions 运行签到脚本存在违反 GitHub ToS 的风险，请谨慎使用并自行承担后果。
 
 ## 配置指南
 
@@ -42,7 +42,8 @@ cp config.example.yaml config.yaml
 * **微信服务号**：通过公众号模板消息推送。
 * **Server 酱 (Turbo版/Server酱³)**：通过微信/手机客户端推送。
 * **Bark**：通过 Bark App 推送到 iOS 设备，支持官方服务和自建 Bark Server。
-
+* **Telegram Bot**：通过 **Telegram** 机器人发送通知。
+* **自定义 Webhook**：支持 **GET** 与 **POST** 请求，便于自由接入目前未支持的通知渠道（如钉钉、飞书或其他自建服务）。
 ---
 
 ## Docker 部署 (推荐)

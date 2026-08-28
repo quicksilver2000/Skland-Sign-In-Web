@@ -50,6 +50,14 @@ class NotifierManager:
         bark_cfg = notify_cfg.get("bark", {})
         if bark_cfg.get("key") or bark_cfg.get("device_key") or bark_cfg.get("device_keys"):
             self.notifiers.append(BarkNotifier(bark_cfg))
+        
+        telegram_cfg = notify_cfg.get("telegram", {})
+        if telegram_cfg.get("bot_token") and telegram_cfg.get("chat_id"):
+            self.notifiers.append(TelegramNotifier(telegram_cfg))
+        
+        custom_webhook_cfg = notify_cfg.get("custom_webhook", {})
+        if custom_webhook_cfg.get("url"):
+            self.notifiers.append(CustomWebhookNotifier(custom_webhook_cfg))    
 
         if not self.notifiers:
             logger.info("未配置任何通知渠道，跳过推送")
@@ -439,3 +447,99 @@ class ServerChan3Notifier(BaseNotifier):
                     logger.error(f"[ServerChan3] 推送异常 -> {key[:8]}...: {e}")
                     all_success = False
         return all_success
+# ==================== Telegram Bot ====================
+class TelegramNotifier(BaseNotifier):
+    name = "Telegram"
+
+    def __init__(self, cfg: dict):
+        self.bot_token = cfg.get("bot_token", "")
+        self.chat_id = cfg.get("chat_id", "")
+        # 支持自定义反代地址，默认使用官方 API，并清理末尾斜杠
+        self.base_url = cfg.get("base_url", "https://api.telegram.org").rstrip("/")
+
+    async def send(self, message: str) -> bool:
+        if not self.bot_token or not self.chat_id:
+            logger.error("[Telegram] 未配置 bot_token 或 chat_id")
+            return False
+
+        url = f"{self.base_url}/bot{self.bot_token}/sendMessage"
+        payload = {
+            "chat_id": self.chat_id,
+            "text": message
+        }
+
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.post(url, json=payload)
+                result = resp.json()
+                
+                if result.get("ok"):
+                    logger.info("[Telegram] 推送成功")
+                    return True
+                else:
+                    logger.error(f"[Telegram] 推送失败: {result.get('description')}")
+                    return False
+            except Exception as e:
+                logger.error(f"[Telegram] 推送异常: {e}")
+                return False
+# ==================== 自定义 Webhook ====================
+class CustomWebhookNotifier(BaseNotifier):
+    name = "CustomWebhook"
+
+    def __init__(self, cfg: dict):
+        self.url = cfg.get("url", "")
+        self.method = cfg.get("method", "POST").upper()
+        self.headers = cfg.get("headers", {})
+        # 默认回退到一个基础的 json 结构
+        self.body_template = cfg.get("body_template", {"content": "{{message}}"})
+
+    def _format_payload(self, template, message: str):
+        """递归遍历字典或列表，替换占位符"""
+        if isinstance(template, dict):
+            return {k: self._format_payload(v, message) for k, v in template.items()}
+        elif isinstance(template, list):
+            return [self._format_payload(v, message) for v in template]
+        elif isinstance(template, str):
+            return template.replace("{{message}}", message)
+        else:
+            return template
+
+    async def send(self, message: str) -> bool:
+        if not self.url:
+            logger.error("[CustomWebhook] 未配置 URL")
+            return False
+
+        # 将模板中的 {{message}} 渲染为真实的推送内容
+        payload = self._format_payload(self.body_template, message)
+        
+        async with httpx.AsyncClient() as client:
+            try:
+                kwargs = {"headers": self.headers}
+                
+                # 根据 HTTP 方法自动判定负载挂载位置
+                if self.method == "GET":
+                    # GET 请求一般挂载在 params (即 URL 的 ?a=1&b=2)
+                    kwargs["params"] = payload if isinstance(payload, dict) else {}
+                else:
+                    # POST/PUT/PATCH 请求
+                    if isinstance(payload, str):
+                        # 如果模板配置为纯字符串，则发 raw text
+                        kwargs["content"] = payload
+                    else:
+                        # 如果模板配置为字典，则自动序列化为 JSON
+                        kwargs["json"] = payload
+
+                # 动态获取对应的请求方法 (client.post / client.get 等)
+                request_method = getattr(client, self.method.lower(), client.post)
+                resp = await request_method(self.url, **kwargs)
+                
+                # 兼容 200, 201, 202, 204 等一切 20x 成功状态码
+                if resp.status_code in (200, 201, 202, 204):
+                    logger.info(f"[CustomWebhook] 推送成功 (HTTP {resp.status_code})")
+                    return True
+                else:
+                    logger.error(f"[CustomWebhook] 推送失败: HTTP {resp.status_code} - 响应: {resp.text}")
+                    return False
+            except Exception as e:
+                logger.error(f"[CustomWebhook] 推送异常: {e}")
+                return False                
